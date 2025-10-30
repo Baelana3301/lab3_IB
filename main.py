@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 import os
+import struct
 
 
 # Реализация генератора Парка-Миллера из предыдущей лабораторной работы
@@ -102,6 +103,7 @@ class StreamCipherApp:
         self.generator = None
         self.current_file_content = None
         self.encrypted_content = None
+        self.is_encrypted = False  # Флаг для отслеживания состояния файла
 
         self.create_widgets()
 
@@ -225,6 +227,10 @@ class StreamCipherApp:
                 with open(filename, 'rb') as f:
                     self.current_file_content = f.read()
 
+                # Сбрасываем флаг шифрования при загрузке нового файла
+                self.is_encrypted = False
+                self.encrypted_content = None
+
                 # Пытаемся декодировать как текст
                 try:
                     text_content = self.current_file_content.decode('utf-8')
@@ -232,21 +238,38 @@ class StreamCipherApp:
                     self.file_text.delete(1.0, tk.END)
                     self.file_text.insert(tk.END, preview)
                     file_type = "Текстовый"
+                    self.is_encrypted = self.looks_like_encrypted(text_content)
                 except UnicodeDecodeError:
-                    # Бинарный файл
+                    # Бинарный файл - скорее всего зашифрованный
                     hex_preview = self.current_file_content[:100].hex()
                     self.file_text.delete(1.0, tk.END)
                     self.file_text.insert(tk.END, f"Бинарные данные (первые 100 байт в HEX):\n{hex_preview}")
                     file_type = "Бинарный"
+                    self.is_encrypted = True
+                    self.encrypted_content = self.current_file_content
 
-                self.file_info_var.set(
-                    f"Загружен {file_type} файл: {os.path.basename(filename)} ({len(self.current_file_content)} байт)")
-                self.encrypted_content = None
+                status_info = f"Загружен {file_type} файл: {os.path.basename(filename)} ({len(self.current_file_content)} байт)"
+                if self.is_encrypted:
+                    status_info += " [ЗАШИФРОВАН]"
+
+                self.file_info_var.set(status_info)
                 self.status_var.set(f"Файл загружен: {os.path.basename(filename)}")
 
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Ошибка при загрузке файла: {str(e)}")
                 self.status_var.set("Ошибка загрузки файла")
+
+    def looks_like_encrypted(self, text):
+        """Пытается определить, является ли текст зашифрованным"""
+        # Простая эвристика: если много непечатных символов - вероятно зашифрован
+        if len(text) == 0:
+            return False
+
+        printable_count = sum(1 for char in text if 32 <= ord(char) <= 126)
+        printable_ratio = printable_count / len(text)
+
+        # Если менее 70% печатных символов - считаем зашифрованным
+        return printable_ratio < 0.7
 
     def initialize_generator(self):
         """Инициализация генератора псевдослучайных чисел на основе пароля"""
@@ -281,6 +304,7 @@ class StreamCipherApp:
             # Выполняем XOR шифрование
             encrypted_data = bytes(a ^ b for a, b in zip(self.current_file_content, key_stream))
             self.encrypted_content = encrypted_data
+            self.is_encrypted = True
 
             # Показываем превью зашифрованных данных
             try:
@@ -293,7 +317,7 @@ class StreamCipherApp:
             self.file_text.delete(1.0, tk.END)
             self.file_text.insert(tk.END, preview)
 
-            self.file_info_var.set(f"Файл зашифрован. Размер: {len(encrypted_data)} байт")
+            self.file_info_var.set(f"Файл зашифрован. Размер: {len(encrypted_data)} байт [ЗАШИФРОВАН]")
             self.status_var.set("Шифрование завершено")
 
         except Exception as e:
@@ -302,9 +326,16 @@ class StreamCipherApp:
 
     def decrypt_file(self):
         """Дешифрование файла"""
-        if self.encrypted_content is None:
-            messagebox.showwarning("Предупреждение", "Сначала зашифруйте файл или загрузите зашифрованный файл")
+        if self.current_file_content is None:
+            messagebox.showwarning("Предупреждение", "Сначала загрузите файл")
             return
+
+        # Разрешаем дешифрование если файл помечен как зашифрованный ИЛИ есть encrypted_content
+        if not self.is_encrypted and self.encrypted_content is None:
+            messagebox.showwarning("Предупреждение",
+                                   "Файл не распознан как зашифрованный.\n"
+                                   "Если это зашифрованный файл, программа попытается его расшифровать.")
+            # Все равно продолжаем, но предупреждаем пользователя
 
         if not self.initialize_generator():
             return
@@ -313,11 +344,14 @@ class StreamCipherApp:
             self.status_var.set("Дешифрование...")
             self.root.update()
 
-            # Генерируем ключевую последовательность той же длины, что и зашифрованные данные
-            key_stream = self.generator.next_bytes(len(self.encrypted_content))
+            # Используем encrypted_content если есть, иначе current_file_content
+            data_to_decrypt = self.encrypted_content if self.encrypted_content is not None else self.current_file_content
 
-            # Выполняем XOR дешифрование (такая же операция как при шифровании)
-            decrypted_data = bytes(a ^ b for a, b in zip(self.encrypted_content, key_stream))
+            # Генерируем ключевую последовательность той же длины
+            key_stream = self.generator.next_bytes(len(data_to_decrypt))
+
+            # Выполняем XOR дешифрование
+            decrypted_data = bytes(a ^ b for a, b in zip(data_to_decrypt, key_stream))
 
             # Показываем результат
             try:
@@ -334,6 +368,8 @@ class StreamCipherApp:
 
             self.file_info_var.set(f"Файл расшифрован. {file_type} файл, размер: {len(decrypted_data)} байт")
             self.current_file_content = decrypted_data
+            self.is_encrypted = False
+            self.encrypted_content = None
             self.status_var.set("Дешифрование завершено")
 
         except Exception as e:
