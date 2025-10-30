@@ -1,7 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 import os
-import struct
 
 
 # Реализация генератора Парка-Миллера из предыдущей лабораторной работы
