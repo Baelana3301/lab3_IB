@@ -1,13 +1,14 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
+import hashlib
 import os
 import struct
 
 
-# Реализация генератора Парка-Миллера из предыдущей лабораторной работы
+# Реализация генератора Парка-Миллера из лабораторной работы №2
 class ParkMillerGenerator:
     def __init__(self, seed=1):
-        self.a = 16807  # 7^5 = 16807
+        self.a = 16807  # γ5 = 16807
         self.m = 2 ** 31 - 1  # 2^31 - 1 = 2147483647
         self.state = seed
 
@@ -24,16 +25,17 @@ class ParkMillerGenerator:
         """Генерация последовательности из n битов"""
         return [self.next_bit() for _ in range(n)]
 
-    def next_byte(self):
-        """Генерация следующего байта"""
-        return self.next_int() % 256
-
     def next_bytes(self, n):
-        """Генерация последовательности из n байтов"""
-        return bytes([self.next_byte() for _ in range(n)])
+        """Генерация n байтов"""
+        bytes_list = []
+        for _ in range(n):
+            # Генерируем 4 байта из одного 32-битного числа
+            num = self.next_int()
+            bytes_list.extend(struct.pack('>I', num))
+        return bytes(bytes_list[:n])
 
 
-# Таблица подстановки из MāHash7
+# Таблица подстановки из MaHash7
 sTable = [
     0xa3, 0xd7, 0x09, 0x83, 0xf8, 0x48, 0xf6, 0xf4, 0xb3, 0x21, 0x15, 0x78, 0x99, 0xb1, 0xaf, 0xf9,
     0xe7, 0x2d, 0x4d, 0x8a, 0xce, 0x4c, 0xca, 0x2e, 0x52, 0x95, 0xd9, 0x1e, 0x4e, 0x38, 0x44, 0x28,
@@ -44,7 +46,7 @@ sTable = [
     0x35, 0xd5, 0xc0, 0xa7, 0x33, 0x06, 0x65, 0x69, 0x45, 0x00, 0x94, 0x56, 0x6d, 0x98, 0x9b, 0x76,
     0x97, 0xfc, 0xb2, 0xc2, 0xb0, 0xfe, 0xdb, 0x20, 0xe1, 0xeb, 0xd6, 0xe4, 0xd4, 0x47, 0x4a, 0x1d,
     0x42, 0xed, 0x9e, 0x6e, 0x49, 0x3c, 0xcd, 0x43, 0x27, 0xd2, 0x07, 0xd4, 0xde, 0xc7, 0x67, 0x18,
-    0x89, 0xcb, 0x30, 0x1f, 0x8d, 0xc6, 0x8f, 0xaa, 0xc8, 0x74, 0xdc, 0xc9, 0x5d, 0x5c, 0x31, 0xa4,
+    0x89, 0xcb, 0x30, 0x1f, 0x8d, 0xc6, 0x8f, 0xaa, 0xc8, 0x74, 0xdc, 0xc9, 0x5d, 0x5e, 0x31, 0xa4,
     0x70, 0x88, 0x61, 0x2c, 0x9f, 0x0d, 0x2b, 0x87, 0x50, 0x82, 0x54, 0x64, 0x26, 0x7d, 0x03, 0x40,
     0x34, 0x4b, 0x1c, 0x73, 0xd1, 0xc4, 0xfd, 0x3b, 0xcc, 0xfb, 0x7f, 0xab, 0xe6, 0x3e, 0x5b, 0xa5,
     0xad, 0x04, 0x23, 0x9c, 0x14, 0x51, 0x22, 0xf0, 0x29, 0x79, 0x71, 0x7e, 0xff, 0x8c, 0x0e, 0xe2,
@@ -54,7 +56,7 @@ sTable = [
 ]
 
 
-# Функция хеширования MāHash8
+# Реализация MaHash8
 def LROT14(x):
     """Циклический сдвиг влево на 14 бит"""
     return ((x << 14) | (x >> 18)) & 0xFFFFFFFF
@@ -65,8 +67,8 @@ def RROT14(x):
     return ((x << 18) | (x >> 14)) & 0xFFFFFFFF
 
 
-def Mahash8(data):
-    """Функция хеширования MāHash8"""
+def MaHash8(data):
+    """Реализация хеш-функции MaHash8"""
     if isinstance(data, str):
         data = data.encode('utf-8')
 
@@ -78,56 +80,72 @@ def Mahash8(data):
         byte_val = data[i]
         index = (byte_val + i) & 0xFF
 
+        # Обновление hash1
         hash1 += sTable[index]
-        hash1 = LROT14(hash1 + ((hash1 << 6) ^ (hash1 >> 11)))
+        hash1 = LROT14(hash1 + ((hash1 << 6) ^ (hash1 >> 11))) & 0xFFFFFFFF
 
+        # Обновление hash2
         hash2 += sTable[index]
-        hash2 = RROT14(hash2 + ((hash2 << 6) ^ (hash2 >> 11)))
+        hash2 = RROT14(hash2 + ((hash2 << 6) ^ (hash2 >> 11))) & 0xFFFFFFFF
 
+        # Перестановка частей хешей
         sh1 = hash1
         sh2 = hash2
-
         hash1 = ((sh1 >> 16) & 0xFFFF) | ((sh2 & 0xFFFF) << 16)
         hash2 = ((sh2 >> 16) & 0xFFFF) | ((sh1 & 0xFFFF) << 16)
 
-    return (hash1 ^ hash2) & 0xFFFFFFFF
+    return hash1 ^ hash2
 
 
-class StreamCipherApp:
+def ma_hash8_hex(data):
+    """MaHash8 в шестнадцатеричном формате"""
+    return format(MaHash8(data), '08x')
+
+
+# Готовая хеш-функция (MD5)
+def ready_hash(data):
+    """Использование готовой хеш-функции MD5"""
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+    return hashlib.md5(data).hexdigest()
+
+
+class CryptoApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Потоковый шифр с хешированием - Вариант 4")
+        self.root.title("Потоковое шифрование и хеширование - Вариант 4")
         self.root.geometry("800x700")
 
-        # Генератор
-        self.generator = None
-        self.current_file_content = None
-        self.encrypted_content = None
-        self.is_encrypted = False  # Флаг для отслеживания состояния файла
+        # Генератор для шифрования
+        self.generator = ParkMillerGenerator()
+
+        # Переменные
+        self.current_file = None
+        self.encrypted_data = None
 
         self.create_widgets()
 
     def create_widgets(self):
         """Создание элементов интерфейса"""
         # Заголовок
-        title_label = tk.Label(self.root, text="Потоковый шифр с функцией хеширования MāHash8",
+        title_label = tk.Label(self.root, text="Потоковое шифрование и хеширование",
                                font=("Arial", 14, "bold"))
         title_label.pack(pady=10)
 
-        # Вкладки
+        # Создание вкладок
         notebook = ttk.Notebook(self.root)
         notebook.pack(fill='both', expand=True, padx=10, pady=10)
 
-        # Вкладка шифрования
-        encryption_frame = ttk.Frame(notebook)
-        notebook.add(encryption_frame, text="Шифрование/Дешифрование")
-
         # Вкладка хеширования
-        hashing_frame = ttk.Frame(notebook)
-        notebook.add(hashing_frame, text="Хеширование")
+        hash_frame = ttk.Frame(notebook)
+        notebook.add(hash_frame, text="Хеширование паролей")
 
-        self.setup_encryption_tab(encryption_frame)
-        self.setup_hashing_tab(hashing_frame)
+        # Вкладка шифрования
+        crypto_frame = ttk.Frame(notebook)
+        notebook.add(crypto_frame, text="Шифрование/Дешифрование")
+
+        self.setup_hash_tab(hash_frame)
+        self.setup_crypto_tab(crypto_frame)
 
         # Статус бар
         self.status_var = tk.StringVar()
@@ -136,189 +154,199 @@ class StreamCipherApp:
                               relief=tk.SUNKEN, anchor=tk.W)
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
-    def setup_encryption_tab(self, parent):
-        """Настройка вкладки шифрования"""
-        # Фрейм для пароля
-        password_frame = ttk.LabelFrame(parent, text="Пароль для шифрования")
-        password_frame.pack(fill='x', padx=10, pady=5)
-
-        tk.Label(password_frame, text="Пароль:").grid(row=0, column=0, padx=5, pady=5, sticky='w')
-        self.password_entry = tk.Entry(password_frame, show="*", width=30, bg='beige')
+    def setup_hash_tab(self, parent):
+        """Настройка вкладки хеширования"""
+        # Пароль
+        tk.Label(parent, text="Пароль:").grid(row=0, column=0, padx=5, pady=5, sticky='w')
+        self.password_entry = tk.Entry(parent, width=50, show="*")
         self.password_entry.grid(row=0, column=1, padx=5, pady=5, sticky='ew')
 
-        # Фрейм для операций с файлами
-        file_frame = ttk.LabelFrame(parent, text="Операции с файлами")
-        file_frame.pack(fill='x', padx=10, pady=5)
+        # Кнопки хеширования
+        hash_buttons_frame = tk.Frame(parent)
+        hash_buttons_frame.grid(row=1, column=0, columnspan=2, pady=10)
 
-        self.btn_load_file = tk.Button(file_frame, text="Загрузить файл",
-                                       command=self.load_file, padx=10, pady=5, bg="lightblue")
-        self.btn_load_file.pack(side=tk.LEFT, padx=5, pady=5)
+        self.btn_hash_md5 = tk.Button(hash_buttons_frame, text="Хеш (MD5)",
+                                      command=self.hash_md5, padx=10, pady=5, bg="lightblue")
+        self.btn_hash_md5.pack(side=tk.LEFT, padx=5)
 
-        self.btn_encrypt = tk.Button(file_frame, text="Зашифровать",
+        self.btn_hash_mahash8 = tk.Button(hash_buttons_frame, text="Хеш (MaHash8)",
+                                          command=self.hash_mahash8, padx=10, pady=5, bg="lightgreen")
+        self.btn_hash_mahash8.pack(side=tk.LEFT, padx=5)
+
+        self.btn_hash_both = tk.Button(hash_buttons_frame, text="Оба хеша",
+                                       command=self.hash_both, padx=10, pady=5, bg="orange")
+        self.btn_hash_both.pack(side=tk.LEFT, padx=5)
+
+        # Результаты хеширования
+        tk.Label(parent, text="Результаты хеширования:").grid(row=2, column=0, padx=5, pady=5, sticky='w')
+
+        self.hash_results_text = scrolledtext.ScrolledText(parent, width=70, height=8)
+        self.hash_results_text.grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky='nsew')
+
+        parent.columnconfigure(1, weight=1)
+        parent.rowconfigure(3, weight=1)
+
+    def setup_crypto_tab(self, parent):
+        """Настройка вкладки шифрования"""
+        # Пароль для шифрования
+        tk.Label(parent, text="Пароль для шифрования:").grid(row=0, column=0, padx=5, pady=5, sticky='w')
+        self.crypto_password_entry = tk.Entry(parent, width=50, show="*")
+        self.crypto_password_entry.grid(row=0, column=1, padx=5, pady=5, sticky='ew')
+
+        # Файловые операции
+        file_buttons_frame = tk.Frame(parent)
+        file_buttons_frame.grid(row=1, column=0, columnspan=2, pady=10)
+
+        self.btn_select_file = tk.Button(file_buttons_frame, text="Выбрать файл",
+                                         command=self.select_file, padx=10, pady=5, bg="lightyellow")
+        self.btn_select_file.pack(side=tk.LEFT, padx=5)
+
+        self.btn_encrypt = tk.Button(file_buttons_frame, text="Зашифровать",
                                      command=self.encrypt_file, padx=10, pady=5, bg="lightgreen")
-        self.btn_encrypt.pack(side=tk.LEFT, padx=5, pady=5)
+        self.btn_encrypt.pack(side=tk.LEFT, padx=5)
 
-        self.btn_decrypt = tk.Button(file_frame, text="Расшифровать",
-                                     command=self.decrypt_file, padx=10, pady=5, bg="lightyellow")
-        self.btn_decrypt.pack(side=tk.LEFT, padx=5, pady=5)
+        self.btn_decrypt = tk.Button(file_buttons_frame, text="Расшифровать",
+                                     command=self.decrypt_file, padx=10, pady=5, bg="lightcoral")
+        self.btn_decrypt.pack(side=tk.LEFT, padx=5)
 
-        self.btn_save_result = tk.Button(file_frame, text="Сохранить результат",
-                                         command=self.save_result, padx=10, pady=5, bg="orange")
-        self.btn_save_result.pack(side=tk.LEFT, padx=5, pady=5)
-
-        # Текстовое поле для вывода
-        text_frame = ttk.LabelFrame(parent, text="Содержимое файла")
-        text_frame.pack(fill='both', expand=True, padx=10, pady=5)
-
-        self.file_text = scrolledtext.ScrolledText(text_frame, width=80, height=20, wrap=tk.WORD)
-        self.file_text.pack(fill='both', expand=True, padx=5, pady=5)
+        self.btn_save_result = tk.Button(file_buttons_frame, text="Сохранить результат",
+                                         command=self.save_result, padx=10, pady=5, bg="lightblue")
+        self.btn_save_result.pack(side=tk.LEFT, padx=5)
 
         # Информация о файле
-        self.file_info_var = tk.StringVar()
-        self.file_info_var.set("Файл не загружен")
-        file_info_label = tk.Label(parent, textvariable=self.file_info_var,
-                                   font=("Arial", 10), fg="blue")
-        file_info_label.pack(pady=5)
+        tk.Label(parent, text="Информация о файле:").grid(row=2, column=0, padx=5, pady=5, sticky='w')
+        self.file_info_text = scrolledtext.ScrolledText(parent, width=70, height=10)
+        self.file_info_text.grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky='nsew')
 
-    def setup_hashing_tab(self, parent):
-        """Настройка вкладки хеширования"""
-        # Фрейм для ввода пароля
-        hash_input_frame = ttk.LabelFrame(parent, text="Ввод пароля для хеширования")
-        hash_input_frame.pack(fill='x', padx=10, pady=5)
+        # Прогресс бар
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(parent, variable=self.progress_var, maximum=100)
+        self.progress_bar.grid(row=4, column=0, columnspan=2, padx=5, pady=5, sticky='ew')
 
-        tk.Label(hash_input_frame, text="Пароль:").grid(row=0, column=0, padx=5, pady=5, sticky='w')
-        self.hash_password_entry = tk.Entry(hash_input_frame, width=30, bg='beige')
-        self.hash_password_entry.grid(row=0, column=1, padx=5, pady=5, sticky='ew')
-        self.hash_password_entry.insert(0, "my_password")
+        parent.columnconfigure(1, weight=1)
+        parent.rowconfigure(3, weight=1)
 
-        self.btn_hash = tk.Button(hash_input_frame, text="Вычислить хеш",
-                                  command=self.calculate_hash, padx=10, pady=5, bg="lightgreen")
-        self.btn_hash.grid(row=0, column=2, padx=5, pady=5)
-
-        # Фрейм для результатов хеширования
-        hash_result_frame = ttk.LabelFrame(parent, text="Результат хеширования")
-        hash_result_frame.pack(fill='both', expand=True, padx=10, pady=5)
-
-        self.hash_result_text = scrolledtext.ScrolledText(hash_result_frame, width=80, height=10,
-                                                          wrap=tk.WORD, font=("Courier", 10))
-        self.hash_result_text.pack(fill='both', expand=True, padx=5, pady=5)
-
-        # Информация о функции хеширования
-        info_frame = ttk.LabelFrame(parent, text="Информация о функции хеширования")
-        info_frame.pack(fill='x', padx=10, pady=5)
-
-        info_text = """Функция хеширования: MāHash8
-• Использует таблицу подстановки sTable из алгоритма Skipjack
-• Работает с двумя 32-разрядными значениями hash1 и hash2
-• На каждом шаге выполняет циклические сдвиги и перемешивание битов
-• Возвращает 32-битный хеш (8 шестнадцатеричных цифр)"""
-
-        info_label = tk.Label(info_frame, text=info_text, justify=tk.LEFT, font=("Arial", 9))
-        info_label.pack(padx=5, pady=5)
-
-    def load_file(self):
-        """Загрузка файла для шифрования/дешифрования"""
-        filename = filedialog.askopenfilename(
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
-        )
-
-        if filename:
-            try:
-                with open(filename, 'rb') as f:
-                    self.current_file_content = f.read()
-
-                # Сбрасываем флаг шифрования при загрузке нового файла
-                self.is_encrypted = False
-                self.encrypted_content = None
-
-                # Пытаемся декодировать как текст
-                try:
-                    text_content = self.current_file_content.decode('utf-8')
-                    preview = text_content[:500] + ("..." if len(text_content) > 500 else "")
-                    self.file_text.delete(1.0, tk.END)
-                    self.file_text.insert(tk.END, preview)
-                    file_type = "Текстовый"
-                    self.is_encrypted = self.looks_like_encrypted(text_content)
-                except UnicodeDecodeError:
-                    # Бинарный файл - скорее всего зашифрованный
-                    hex_preview = self.current_file_content[:100].hex()
-                    self.file_text.delete(1.0, tk.END)
-                    self.file_text.insert(tk.END, f"Бинарные данные (первые 100 байт в HEX):\n{hex_preview}")
-                    file_type = "Бинарный"
-                    self.is_encrypted = True
-                    self.encrypted_content = self.current_file_content
-
-                status_info = f"Загружен {file_type} файл: {os.path.basename(filename)} ({len(self.current_file_content)} байт)"
-                if self.is_encrypted:
-                    status_info += " [ЗАШИФРОВАН]"
-
-                self.file_info_var.set(status_info)
-                self.status_var.set(f"Файл загружен: {os.path.basename(filename)}")
-
-            except Exception as e:
-                messagebox.showerror("Ошибка", f"Ошибка при загрузке файла: {str(e)}")
-                self.status_var.set("Ошибка загрузки файла")
-
-    def looks_like_encrypted(self, text):
-        """Пытается определить, является ли текст зашифрованным"""
-        # Простая эвристика: если много непечатных символов - вероятно зашифрован
-        if len(text) == 0:
-            return False
-
-        printable_count = sum(1 for char in text if 32 <= ord(char) <= 126)
-        printable_ratio = printable_count / len(text)
-
-        # Если менее 70% печатных символов - считаем зашифрованным
-        return printable_ratio < 0.7
-
-    def initialize_generator(self):
-        """Инициализация генератора псевдослучайных чисел на основе пароля"""
+    def hash_md5(self):
+        """Хеширование с помощью MD5"""
         password = self.password_entry.get()
         if not password:
-            messagebox.showwarning("Предупреждение", "Введите пароль для инициализации генератора")
-            return False
+            messagebox.showwarning("Предупреждение", "Введите пароль")
+            return
 
-        # Вычисляем хеш пароля для использования как seed
-        password_hash = Mahash8(password)
-        self.generator = ParkMillerGenerator(password_hash)
+        hash_result = ready_hash(password)
 
-        self.status_var.set(f"Генератор инициализирован с хешем пароля: {password_hash:08X}")
-        return True
+        self.hash_results_text.delete(1.0, tk.END)
+        self.hash_results_text.insert(tk.END, f"Пароль: {password}\n")
+        self.hash_results_text.insert(tk.END, f"MD5 хеш: {hash_result}\n")
+        self.hash_results_text.insert(tk.END, f"Длина: {len(hash_result)} символов\n")
+
+        self.status_var.set("MD5 хеш вычислен")
+
+    def hash_mahash8(self):
+        """Хеширование с помощью MaHash8"""
+        password = self.password_entry.get()
+        if not password:
+            messagebox.showwarning("Предупреждение", "Введите пароль")
+            return
+
+        hash_result = ma_hash8_hex(password)
+
+        self.hash_results_text.delete(1.0, tk.END)
+        self.hash_results_text.insert(tk.END, f"Пароль: {password}\n")
+        self.hash_results_text.insert(tk.END, f"MaHash8 хеш: {hash_result}\n")
+        self.hash_results_text.insert(tk.END, f"Длина: {len(hash_result)} символов\n")
+
+        self.status_var.set("MaHash8 хеш вычислен")
+
+    def hash_both(self):
+        """Хеширование обоими методами"""
+        password = self.password_entry.get()
+        if not password:
+            messagebox.showwarning("Предупреждение", "Введите пароль")
+            return
+
+        md5_hash = ready_hash(password)
+        mahash8_hash = ma_hash8_hex(password)
+
+        self.hash_results_text.delete(1.0, tk.END)
+        self.hash_results_text.insert(tk.END, f"Пароль: {password}\n\n")
+        self.hash_results_text.insert(tk.END, f"MD5 хеш: {md5_hash}\n")
+        self.hash_results_text.insert(tk.END, f"Длина: {len(md5_hash)} символов\n\n")
+        self.hash_results_text.insert(tk.END, f"MaHash8 хеш: {mahash8_hash}\n")
+        self.hash_results_text.insert(tk.END, f"Длина: {len(mahash8_hash)} символов\n")
+
+        self.status_var.set("Оба хеша вычислены")
+
+    def select_file(self):
+        """Выбор файла для шифрования/дешифрования"""
+        filename = filedialog.askopenfilename()
+        if filename:
+            self.current_file = filename
+            file_size = os.path.getsize(filename)
+
+            self.file_info_text.delete(1.0, tk.END)
+            self.file_info_text.insert(tk.END, f"Выбран файл: {filename}\n")
+            self.file_info_text.insert(tk.END, f"Размер: {file_size} байт\n")
+            self.file_info_text.insert(tk.END, f"Тип: {'Текстовый' if file_size < 1024 else 'Бинарный'}\n")
+
+            # Показ превью для текстовых файлов
+            if file_size < 1024:  # Показываем превью только для маленьких файлов
+                try:
+                    with open(filename, 'r', encoding='utf-8') as f:
+                        preview = f.read(200)
+                        self.file_info_text.insert(tk.END, f"\nПревью:\n{preview}")
+                        if file_size > 200:
+                            self.file_info_text.insert(tk.END, "\n... (файл обрезан)")
+                except:
+                    self.file_info_text.insert(tk.END, "\n(не удалось прочитать как текст)")
+
+            self.status_var.set(f"Выбран файл: {os.path.basename(filename)}")
+
+    def init_generator_from_password(self, password):
+        """Инициализация генератора из пароля"""
+        seed = MaHash8(password)  # Используем MaHash8 для создания seed из пароля
+        self.generator = ParkMillerGenerator(seed)
 
     def encrypt_file(self):
         """Шифрование файла"""
-        if self.current_file_content is None:
-            messagebox.showwarning("Предупреждение", "Сначала загрузите файл")
+        if not self.current_file:
+            messagebox.showwarning("Предупреждение", "Сначала выберите файл")
             return
 
-        if not self.initialize_generator():
+        password = self.crypto_password_entry.get()
+        if not password:
+            messagebox.showwarning("Предупреждение", "Введите пароль для шифрования")
             return
 
         try:
             self.status_var.set("Шифрование...")
+            self.progress_var.set(0)
             self.root.update()
 
-            # Генерируем ключевую последовательность той же длины, что и файл
-            key_stream = self.generator.next_bytes(len(self.current_file_content))
+            # Инициализация генератора из пароля
+            self.init_generator_from_password(password)
 
-            # Выполняем XOR шифрование
-            encrypted_data = bytes(a ^ b for a, b in zip(self.current_file_content, key_stream))
-            self.encrypted_content = encrypted_data
-            self.is_encrypted = True
+            # Чтение файла
+            with open(self.current_file, 'rb') as f:
+                file_data = f.read()
 
-            # Показываем превью зашифрованных данных
-            try:
-                text_preview = encrypted_data[:200].decode('utf-8', errors='ignore')
-                preview = f"Зашифрованные данные (первые 200 символов):\n{text_preview}"
-            except:
-                hex_preview = encrypted_data[:100].hex()
-                preview = f"Зашифрованные бинарные данные (первые 100 байт в HEX):\n{hex_preview}"
+            # Генерация ключевого потока
+            key_stream = self.generator.next_bytes(len(file_data))
 
-            self.file_text.delete(1.0, tk.END)
-            self.file_text.insert(tk.END, preview)
+            # Шифрование XOR
+            encrypted = bytes([file_data[i] ^ key_stream[i] for i in range(len(file_data))])
 
-            self.file_info_var.set(f"Файл зашифрован. Размер: {len(encrypted_data)} байт [ЗАШИФРОВАН]")
-            self.status_var.set("Шифрование завершено")
+            self.encrypted_data = encrypted
+
+            self.file_info_text.delete(1.0, tk.END)
+            self.file_info_text.insert(tk.END, f"Файл зашифрован: {self.current_file}\n")
+            self.file_info_text.insert(tk.END, f"Исходный размер: {len(file_data)} байт\n")
+            self.file_info_text.insert(tk.END, f"Зашифрованный размер: {len(encrypted)} байт\n")
+            self.file_info_text.insert(tk.END, f"Пароль: {password}\n")
+            self.file_info_text.insert(tk.END, f"Seed (из хеша пароля): {MaHash8(password)}\n")
+
+            self.progress_var.set(100)
+            self.status_var.set("Файл зашифрован")
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при шифровании: {str(e)}")
@@ -326,63 +354,61 @@ class StreamCipherApp:
 
     def decrypt_file(self):
         """Дешифрование файла"""
-        if self.current_file_content is None:
-            messagebox.showwarning("Предупреждение", "Сначала загрузите файл")
+        if not self.current_file:
+            messagebox.showwarning("Предупреждение", "Сначала выберите файл")
             return
 
-        # Разрешаем дешифрование если файл помечен как зашифрованный ИЛИ есть encrypted_content
-        if not self.is_encrypted and self.encrypted_content is None:
-            messagebox.showwarning("Предупреждение",
-                                   "Файл не распознан как зашифрованный.\n"
-                                   "Если это зашифрованный файл, программа попытается его расшифровать.")
-            # Все равно продолжаем, но предупреждаем пользователя
-
-        if not self.initialize_generator():
+        password = self.crypto_password_entry.get()
+        if not password:
+            messagebox.showwarning("Предупреждение", "Введите пароль для дешифрования")
             return
 
         try:
             self.status_var.set("Дешифрование...")
+            self.progress_var.set(0)
             self.root.update()
 
-            # Используем encrypted_content если есть, иначе current_file_content
-            data_to_decrypt = self.encrypted_content if self.encrypted_content is not None else self.current_file_content
+            # Инициализация генератора из пароля
+            self.init_generator_from_password(password)
 
-            # Генерируем ключевую последовательность той же длины
-            key_stream = self.generator.next_bytes(len(data_to_decrypt))
+            # Чтение зашифрованного файла
+            with open(self.current_file, 'rb') as f:
+                encrypted_data = f.read()
 
-            # Выполняем XOR дешифрование
-            decrypted_data = bytes(a ^ b for a, b in zip(data_to_decrypt, key_stream))
+            # Генерация ключевого потока
+            key_stream = self.generator.next_bytes(len(encrypted_data))
 
-            # Показываем результат
+            # Дешифрование XOR
+            decrypted = bytes([encrypted_data[i] ^ key_stream[i] for i in range(len(encrypted_data))])
+
+            self.encrypted_data = decrypted
+
+            self.file_info_text.delete(1.0, tk.END)
+            self.file_info_text.insert(tk.END, f"Файл расшифрован: {self.current_file}\n")
+            self.file_info_text.insert(tk.END, f"Размер данных: {len(decrypted)} байт\n")
+            self.file_info_text.insert(tk.END, f"Пароль: {password}\n")
+
+            # Попытка показать превью для текста
             try:
-                text_content = decrypted_data.decode('utf-8')
-                preview = text_content[:500] + ("..." if len(text_content) > 500 else "")
-                self.file_text.delete(1.0, tk.END)
-                self.file_text.insert(tk.END, preview)
-                file_type = "Текстовый"
-            except UnicodeDecodeError:
-                hex_preview = decrypted_data[:100].hex()
-                self.file_text.delete(1.0, tk.END)
-                self.file_text.insert(tk.END, f"Бинарные данные (первые 100 байт в HEX):\n{hex_preview}")
-                file_type = "Бинарный"
+                text_preview = decrypted[:200].decode('utf-8')
+                self.file_info_text.insert(tk.END, f"\nПревью:\n{text_preview}")
+                if len(decrypted) > 200:
+                    self.file_info_text.insert(tk.END, "\n... (данные обрезаны)")
+            except:
+                self.file_info_text.insert(tk.END, "\n(бинарные данные)")
 
-            self.file_info_var.set(f"Файл расшифрован. {file_type} файл, размер: {len(decrypted_data)} байт")
-            self.current_file_content = decrypted_data
-            self.is_encrypted = False
-            self.encrypted_content = None
-            self.status_var.set("Дешифрование завершено")
+            self.progress_var.set(100)
+            self.status_var.set("Файл расшифрован")
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при дешифровании: {str(e)}")
             self.status_var.set("Ошибка дешифрования")
 
     def save_result(self):
-        """Сохранение результата (зашифрованного или расшифрованного) в файл"""
-        if self.current_file_content is None and self.encrypted_content is None:
+        """Сохранение результата шифрования/дешифрования"""
+        if self.encrypted_data is None:
             messagebox.showwarning("Предупреждение", "Нет данных для сохранения")
             return
-
-        data_to_save = self.encrypted_content if self.encrypted_content is not None else self.current_file_content
 
         filename = filedialog.asksaveasfilename(
             defaultextension=".bin",
@@ -392,48 +418,19 @@ class StreamCipherApp:
         if filename:
             try:
                 with open(filename, 'wb') as f:
-                    f.write(data_to_save)
+                    f.write(self.encrypted_data)
 
                 messagebox.showinfo("Успех", f"Данные сохранены в файл:\n{filename}")
                 self.status_var.set(f"Данные сохранены: {os.path.basename(filename)}")
 
             except Exception as e:
-                messagebox.showerror("Ошибка", f"Ошибка при сохранении файла: {str(e)}")
+                messagebox.showerror("Ошибка", f"Ошибка при сохранении: {str(e)}")
                 self.status_var.set("Ошибка сохранения")
-
-    def calculate_hash(self):
-        """Вычисление хеша пароля"""
-        password = self.hash_password_entry.get()
-        if not password:
-            messagebox.showwarning("Предупреждение", "Введите пароль для хеширования")
-            return
-
-        try:
-            hash_value = Mahash8(password)
-
-            result_text = f"""Результат хеширования пароля:
-Пароль: '{password}'
-Хеш (десятичный): {hash_value}
-Хеш (шестнадцатеричный): {hash_value:08X}
-Хеш (бинарный): {hash_value:032b}
-
-Детали вычисления:
-• Длина пароля: {len(password)} символов
-• Использована функция: MāHash8
-• Размер хеша: 32 бита (4 байта)"""
-
-            self.hash_result_text.delete(1.0, tk.END)
-            self.hash_result_text.insert(tk.END, result_text)
-            self.status_var.set(f"Вычислен хеш пароля: {hash_value:08X}")
-
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при вычислении хеша: {str(e)}")
-            self.status_var.set("Ошибка вычисления хеша")
 
 
 def main():
     root = tk.Tk()
-    app = StreamCipherApp(root)
+    app = CryptoApp(root)
     root.mainloop()
 
 
